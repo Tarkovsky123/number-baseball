@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>숫자야구</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --card: #ffffff; --ink: #1d1d1b; --muted: #6b6a66;
+    --line: #e2e0da; --accent: #1f6f4a; --strike: #1f6f4a; --ball: #b7791f;
+    --out: #9b2c2c; --warn: #9b2c2c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614; --card: #22221f; --ink: #ecebe6; --muted: #9c9a94;
+      --line: #363531; --accent: #4fb985; --strike: #4fb985; --ball: #e0a94a;
+      --out: #e07070; --warn: #e07070;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+    display: flex; justify-content: center; padding: 32px 16px;
+  }
+  main { width: 100%; max-width: 440px; }
+  h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.02em; }
+  .rule { color: var(--muted); font-size: 14px; margin: 0 0 20px; line-height: 1.6; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+  .status { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
+  .status b { font-size: 22px; }
+  .status span { color: var(--muted); font-size: 14px; }
+  form { display: flex; gap: 8px; }
+  input {
+    flex: 1; min-width: 0; font-size: 26px; letter-spacing: 0.4em; text-align: center;
+    padding: 10px; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--bg); color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button {
+    font: inherit; font-size: 16px; font-weight: 600; padding: 0 18px; border: 0;
+    border-radius: 10px; background: var(--accent); color: #fff; cursor: pointer;
+  }
+  button:disabled { opacity: 0.4; cursor: default; }
+  .msg { min-height: 22px; margin: 10px 2px 0; font-size: 14px; color: var(--warn); }
+  ol { list-style: none; padding: 0; margin: 16px 0 0; }
+  li {
+    display: grid; grid-template-columns: 44px 1fr auto; align-items: center;
+    padding: 10px 2px; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums;
+  }
+  li .n { color: var(--muted); font-size: 13px; }
+  li .g { font-size: 20px; letter-spacing: 0.25em; }
+  .r { font-weight: 700; font-size: 15px; }
+  .s { color: var(--strike); } .b { color: var(--ball); } .o { color: var(--out); }
+  .end { margin-top: 16px; padding: 14px; border-radius: 10px; background: var(--bg); text-align: center; display: none; }
+  .end.show { display: block; }
+  .end p { margin: 0 0 10px; font-size: 16px; }
+  .end strong { letter-spacing: 0.2em; font-size: 22px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>숫자야구</h1>
+  <p class="rule">
+    서로 다른 숫자 4개로 된 정답을 맞혀 보세요. 첫 자리는 0이 아닙니다. 기회는 10번입니다.<br>
+    <span class="s">S</span> 숫자·자리 모두 맞음 ·
+    <span class="b">B</span> 숫자만 맞음 ·
+    <span class="o">아웃</span> 하나도 없음
+  </p>
+
+  <div class="card">
+    <div class="status">
+      <b id="left">남은 기회 10번</b>
+      <span id="count">0 / 10</span>
+    </div>
+    <form id="form" autocomplete="off">
+      <input id="guess" inputmode="numeric" maxlength="4" placeholder="1234" aria-label="4자리 숫자">
+      <button id="submit" type="submit">확인</button>
+    </form>
+    <div class="msg" id="msg" role="alert"></div>
+
+    <div class="end" id="end">
+      <p id="endText"></p>
+      <button type="button" id="restart">새 게임</button>
+    </div>
+
+    <ol id="history"></ol>
+  </div>
+</main>
+
+<script>
+  const MAX = 10;
+  let answer, tries, over;
+
+  const $ = id => document.getElementById(id);
+
+  function makeAnswer() {
+    const digits = [0,1,2,3,4,5,6,7,8,9];
+    for (let i = digits.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [digits[i], digits[j]] = [digits[j], digits[i]];
+    }
+    if (digits[0] === 0) {           // 첫 자리 0 방지: 뒤쪽 0이 아닌 숫자와 교환
+      const k = digits.findIndex((d, i) => i > 0 && d !== 0);
+      [digits[0], digits[k]] = [digits[k], digits[0]];
+    }
+    return digits.slice(0, 4).join('');
+  }
+
+  function validate(g) {
+    if (!/^\d{4}$/.test(g)) return '숫자 4자리를 입력하세요.';
+    if (g[0] === '0') return '첫 자리는 0이 될 수 없습니다.';
+    if (new Set(g).size !== 4) return '같은 숫자를 두 번 쓸 수 없습니다.';
+    return '';
+  }
+
+  function judge(g) {
+    let s = 0, b = 0;
+    for (let i = 0; i < 4; i++) {
+      if (g[i] === answer[i]) s++;
+      else if (answer.includes(g[i])) b++;
+    }
+    return { s, b };
+  }
+
+  function resultHTML({ s, b }) {
+    if (s === 0 && b === 0) return '<span class="r o">아웃</span>';
+    const parts = [];
+    if (s) parts.push(`<span class="s">${s}S</span>`);
+    if (b) parts.push(`<span class="b">${b}B</span>`);
+    return `<span class="r">${parts.join(' ')}</span>`;
+  }
+
+  function finish(win) {
+    over = true;
+    $('guess').disabled = true;
+    $('submit').disabled = true;
+    $('endText').innerHTML = win
+      ? `${tries}번 만에 맞혔습니다! 정답 <strong>${answer}</strong>`
+      : `기회를 모두 썼습니다. 정답은 <strong>${answer}</strong>`;
+    $('end').classList.add('show');
+    $('restart').focus();
+  }
+
+  function start() {
+    answer = makeAnswer();
+    tries = 0;
+    over = false;
+    $('history').innerHTML = '';
+    $('msg').textContent = '';
+    $('end').classList.remove('show');
+    $('guess').disabled = false;
+    $('submit').disabled = false;
+    $('guess').value = '';
+    updateStatus();
+    $('guess').focus();
+  }
+
+  function updateStatus() {
+    $('left').textContent = `남은 기회 ${MAX - tries}번`;
+    $('count').textContent = `${tries} / ${MAX}`;
+  }
+
+  $('guess').addEventListener('input', e => {
+    e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4);
+  });
+
+  $('form').addEventListener('submit', e => {
+    e.preventDefault();
+    if (over) return;
+    const g = $('guess').value.trim();
+    const err = validate(g);
+    $('msg').textContent = err;           // 규칙에 맞지 않으면 기회를 쓰지 않음
+    if (err) return;
+
+    tries++;
+    const r = judge(g);
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="n">${tries}</span><span class="g">${g}</span>${resultHTML(r)}`;
+    $('history').prepend(li);
+    $('guess').value = '';
+    updateStatus();
+
+    if (r.s === 4) finish(true);
+    else if (tries >= MAX) finish(false);
+  });
+
+  $('restart').addEventListener('click', start);
+  start();
+</script>
+</body>
+</html>
